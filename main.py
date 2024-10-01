@@ -93,21 +93,32 @@ def shop_mask(df,col):
         out.append(get_shop_category(df_shops,shop_name))
     df[col] = out
     return df
+
+def amount_mask(df,col):
+    out = []
+    for amount in df[col]:
+        if(amount == 1):
+            out.append('one')
+        elif(amount <= 4):
+            out.append('some')
+        else:
+            out.append('a lot')
+    df[col] = out
+    return df
     
 if __name__ == '__main__':
     # TODO : shop_name, item_name, brand_name, amount, price
-    df = read_csv(file_name='input_data/all_types_55k.csv',delimiter=';')
+    df = read_csv(file_name='input_data/all_types_10k.csv',delimiter=';')
 
     
     coordinates_mask(df,'Координаты')
     date_mask(df,'Дата и время')
     shop_mask(df,'Магазин')
+    card_mask(df,'Номер карты')
+    amount_mask(df,'Количество')
 
     
-    
-    
-    
-    quasi_identifiers = ['Магазин','Дата и время','Координаты'] # 
+    quasi_identifiers = ['Магазин','Дата и время','Координаты','Номер карты','Количество'] # 
     worst_k, best_k = calculate_k_anonymity(df, quasi_identifiers,all='no')
     
     print("Топ-3 худших строк по k-анонимности:")
