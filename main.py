@@ -8,6 +8,7 @@ import time
 columns = ['Магазин', 'Координаты', 'Дата и время', 'Товар', 'Производитель', 
            'Номер карты', 'Количество', 'Цена', 
             ]
+bad_locations = set(['Технополис Политехнический' ,'Красные Зори' ,'Технопарк Мебельная' ,'Глобус Джус' ,'Туристическое агентство Глобус' ,'Технопарк Рот Фронт' ,'Приневский технопарк' ,'СберМаркет' ,'Издательство Утконос' ,'Технопарк Боровая' ,'Технопарк Арсенал' ,'Азбука Вкуса' ,'Звезда' ,'Павловский коммунальный технопарк' ,'Промышленный Парк на Дерибасовской' ,'Hiker' ,'Промышленный Парк' ,'Ленполиграфмаш' ,'Машиностроительный технопарк Гагарин' ,'Технопарк Санкт-Петербурга' ,'Индустриальный парк Greenstate' ,'Технопарк Мариенбург' ,'Технопарк Новикова' ,'Рандеву' ,'Технопарк' ,'re:Store' ,'PiterGSM' ,'Street Beat Kids' ,'Технопарк Нарвский'])
 
 item_dict = { # 11 unique categories
     'платье': 'одежда',
@@ -143,19 +144,27 @@ def calculate_k_anonymity(df, quasi_identifiers, all='no'):
     # Группируем по квазиидентификаторам и считаем количество строк в каждой группе
     grouped = df.groupby(quasi_identifiers).size().reset_index(name='k-anonymity')
     
-    # df_with_k теперь содержит только уникальные строки с k-анонимностью
+    # df_with_k теперь содержит уникальные строки с добавленным столбцом 'k-anonymity'
     df_with_k = grouped.copy()
 
+    # Сортировка по столбцу 'k-anonymity'
+    df_with_k_sorted = df_with_k.sort_values(by='k-anonymity')
+    
+    # Удаление нижних 5% строк
+    percent_to_remove = 0.05
+    n_rows_to_remove = int(len(df_with_k_sorted) * percent_to_remove)
+    df_with_k_trimmed = df_with_k_sorted.iloc[n_rows_to_remove:]
     
     # Сортируем по 'k-anonymity', чтобы найти строки с наибольшей и наименьшей k-анонимностью
-    worst_k_anonymity = df_with_k.sort_values('k-anonymity').head(3)
-    best_k_anonymity = df_with_k.sort_values('k-anonymity', ascending=False).head(3)
+    worst_k_anonymity = df_with_k_trimmed.sort_values('k-anonymity').head(3)
+    best_k_anonymity = df_with_k_trimmed.sort_values('k-anonymity', ascending=False).head(3)
     
-    # Подсчитываем количество строк с k-анонимностью меньше 5
-    count_k_less_than_5 = (df_with_k['k-anonymity'] < 7).sum()
-    print(f"\nКоличество строк с k-анонимностью меньше 7: {count_k_less_than_5}")
+    # Подсчитываем количество строк с k-анонимностью меньше 7
+    count_k_less_than_7 = (df_with_k_trimmed['k-anonymity'] < 7).sum()
+    print(f"\nКоличество строк с k-анонимностью меньше 7: {count_k_less_than_7}")
 
     return worst_k_anonymity, best_k_anonymity
+
 
 def item_mask(df, col):
     out = []
@@ -197,6 +206,19 @@ def coordinates_mask(df, col):
     df[col] = output
     return df
 
+def coordinates_mask_alternative(df, col):
+    output = []
+    for coordinates,shop_name in df[[col,'Магазин']].values:
+        if shop_name in bad_locations:
+            output.append('- , -')
+        elif shop_name in location_stores:
+            output.append(location_stores[shop_name])
+        else:
+            output.append('0.00 , 0.00')
+            
+    df[col] = output
+    return df
+
 def date_mask(df, col):
     mask = []
     for data in df[col]:
@@ -225,9 +247,7 @@ def shop_mask(df,col):
 def amount_mask(df,col):
     out = []
     for amount in df[col]:
-        if(amount == 1):
-            out.append('one')
-        elif(amount <= 4):
+        if(amount <= 4):
             out.append('some')
         else:
             out.append('a lot')
@@ -238,12 +258,8 @@ def price_mask(df,col):
     out = []
     for price,amount in df[[col,'Количество']].values:
         price /= amount
-        if price < 100:
-            out.append('< 100')
-        elif price < 500:
-            out.append('< 500')
-        elif price < 1500:
-            out.append('< 1500')
+        if price < 500:
+            out.append('< 1000')
         elif price < 5000:
             out.append('< 5000')
         elif price < 10000:
@@ -256,12 +272,31 @@ def price_mask(df,col):
 def calculate_k_anonymity_2(df, columns, k):
     group_counts = df.groupby(columns).size().reset_index(name='count')
     return all(group_counts['count'] >= k)
+
+def get_store_coordinates(csv_file):
+    # Чтение CSV файла с использованием ';' в качестве разделителя
+    df = pd.read_csv(csv_file, delimiter=';', header=None, names=['category', 'store', 'coordinates'])
+    
+    # Создание словаря для хранения результата
+    store_coordinates = {}
+    
+    # Проходим по уникальным названиям магазинов
+    for store in df['store'].unique():
+        # Получаем любые координаты для текущего магазина
+        coords = df[df['store'] == store]['coordinates'].iloc[0]
+        # Добавляем в словарь
+        store_coordinates[store] = coords
+
+    return store_coordinates
+# Пример использования
+
     
 if __name__ == '__main__':
     # TODO : shop_name, item_name, brand_name, amount, price
-    df = read_csv(file_name='input_data/all_types_10k.csv',delimiter=';')
-        
-    coordinates_mask(df,'Координаты')
+    df = read_csv(file_name='input_data/all_types_100k.csv',delimiter=';')
+
+    location_stores = get_store_coordinates('input_data/shop_locations.csv')
+    coordinates_mask_alternative(df,'Координаты')
     date_mask(df,'Дата и время')
     shop_mask(df,'Магазин')
     card_mask(df,'Номер карты')
@@ -269,7 +304,10 @@ if __name__ == '__main__':
     amount_mask(df,'Количество') # always after price_mask
     item_mask(df,'Товар')
     brand_mask(df,'Производитель')
-    quasi_identifiers = ['Магазин','Дата и время','Координаты','Номер карты','Количество', 'Цена','Товар','Производитель'] # 
+    
+    # Удаление нижних 5% строк
+
+    quasi_identifiers = ['Магазин','Координаты','Номер карты','Количество', 'Цена','Товар','Производитель'] # 
     worst_k, best_k = calculate_k_anonymity(df, quasi_identifiers,all='no')
     
     
@@ -279,7 +317,7 @@ if __name__ == '__main__':
 
     print("\n Топ-3 лучших строк по k-анонимности:")
     print(best_k,'\n\n')
-    print(df.head())
+    print(df.head(n=1000))
 
     """
     root = tk.Tk()
