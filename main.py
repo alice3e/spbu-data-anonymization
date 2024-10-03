@@ -5,6 +5,7 @@ from tkinter import filedialog
 from tkinter import messagebox
 import time
 
+df_global = None
 columns = ['Магазин', 'Координаты', 'Дата и время', 'Товар', 'Производитель', 
            'Номер карты', 'Количество', 'Цена', 
             ]
@@ -41,9 +42,9 @@ item_dict = { # 10 unique categories -> micro agreggation
     'мясо': 'мясные продукты',
     'курица': 'мясные продукты',
     'индейка': 'мясные продукты',
-    'специи': 'соус',
-    'кетчуп': 'соус',
-    'майонез': 'соус',
+    'специи': 'еда готовая',
+    'кетчуп': 'еда готовая',
+    'майонез': 'еда готовая',
     'шоколад': 'еда готовая',
     'конфеты': 'еда готовая',
     'суп': 'еда готовая',
@@ -70,7 +71,7 @@ item_dict = { # 10 unique categories -> micro agreggation
     'крекеры': 'еда готовая',
     'творог обезжиренный': 'молочный продукт',
     'напитки': 'еда готовая',
-    'соус': 'соус',
+    'соус': 'еда готовая',
     'холодильник': 'бытовая техника',
     'хлопья': 'еда готовая',
     'фотоаппарат': 'фото/видео/аудио техника',
@@ -97,7 +98,7 @@ item_dict = { # 10 unique categories -> micro agreggation
     'туфли': 'одежда',
     'видеокарта': 'компьютерная техника',
     'соки': 'еда готовая',
-    'приправы': 'соус',
+    'приправы': 'еда готовая',
     'компьютер': 'компьютерная техника',
     'носки': 'одежда',
     'сыр': 'молочный продукт',
@@ -119,8 +120,8 @@ item_dict = { # 10 unique categories -> micro agreggation
     'квас': 'еда готовая',
     'пуховик': 'одежда',
     'материнская плата': 'компьютерная техника',
-    'горчица': 'соус',
-    'соусы': 'соус',
+    'горчица': 'еда готовая',
+    'соусы': 'еда готовая',
     'макароны': 'еда готовая',
     'спортивная куртка': 'одежда',
     'датчик сердечного ритма': 'фото/видео/аудио техника',
@@ -185,7 +186,7 @@ def card_mask(df, col):
 
 
 # если у сети магазинов с одним названием много точек по городу, то меняет их общие координаты на коордианыт одного магазина 
-def coordinates_mask_alternative(df, col):
+def coordinates_mask_alternative(df, col,location_stores):
     output = []
     for coordinates,shop_name in df[[col,'Магазин']].values:
         if shop_name in bad_locations:
@@ -201,7 +202,7 @@ def coordinates_mask_alternative(df, col):
 def date_mask(df, col):
     mask = []
     for data in df[col]:
-        date = data[:10] + "TXX" + ":" + "XX"
+        date = data[:8] + "XXTXX" + ":" + "XX"
         mask.append(date) 
     df[col] = mask
     return df
@@ -252,22 +253,57 @@ def price_mask(df,col):
     df[col] = out
     return df
 
-def add_k_anonymity_column(df, quasi_identifiers):
-    """
-    Функция для добавления k-anonymity к каждой строке датасета
-    на основе квазиидентификаторов.
+def even_stronger_anonymization(df):
+    # Проверяем количество строк
+    if len(df) < 30000:
+        # 1. Агрегация даты до квартала года
+        df['Дата и время'] = df['Дата и время'].apply(lambda dt: f"{dt[:4]}-Q{(int(dt[5:7])-1)//3+1}" if isinstance(dt, str) and len(dt) >= 7 else dt)
+        
+        # 2. Округление координат до целого числа
+        df['Координаты'] = df['Координаты'].apply(lambda coord: ', '.join([f"{round(float(x))}" for x in coord.split(", ")]) if coord != "- , -" else "- , -")
+        
+        # 3. Упрощение категорий товаров
+        df['Товар'] = df['Товар'].apply(lambda item: 'продукты питания' if item in ['еда готовая', 'йогурт', 'ряженка', 'творог обезжиренный','мясные продукты'] 
+                                         else 'электроника' if item in ['фото/видео/аудио техника','бытовая техника', 'компьютерная техника'] 
+                                         else 'прочее')
+        
+        # 4. Упрощение производителей
+        df['Производитель'] = df['Производитель'].apply(lambda prod: 'прочее')
+        
+        # 5. Еще более жесткая маскировка карт
+        df['Номер карты'] = df['Номер карты'].apply(lambda card: str(card)[:0] + "X" * 16)
+        
+        # 6. Сгруппировать цены и количество
+        df['Цена'] = df['Цена'].apply(lambda price: 
+                                      '<10000' if '<5000' in str(price) or '10000' in str(price)
+                                      else '>= 10000')
+        df['Количество'] = df['Количество'].apply(lambda qty: '-') #if 'some' in str(qty) else 'много')
     
+    return df
+
+
+def add_or_update_k_anonymity_column(df, quasi_identifiers):
+    """
+    Функция для добавления или обновления k-anonymity к каждой строке датасета
+    на основе квазиидентификаторов.
+
     :param df: DataFrame
     :param quasi_identifiers: Список квазиидентификаторов
-    :return: DataFrame с добавленным столбцом 'k-anonymity'
+    :return: DataFrame с добавленным или обновленным столбцом 'k-anonymity'
     """
     # Группируем по квазиидентификаторам и считаем количество строк в каждой группе
     grouped = df.groupby(quasi_identifiers).size().reset_index(name='k-anonymity')
-    
-    # Объединяем исходный DataFrame с группированным, чтобы добавить столбец 'k-anonymity'
-    df_with_k = df.merge(grouped, on=quasi_identifiers, how='left')
-    
-    return df_with_k
+
+    # Объединяем исходный DataFrame с группированным, чтобы добавить или обновить столбец 'k-anonymity'
+    if 'k-anonymity' in df.columns:
+        # Обновляем существующий столбец 'k-anonymity'
+        df = df.drop(columns=['k-anonymity']).merge(grouped, on=quasi_identifiers, how='left')
+    else:
+        # Добавляем новый столбец 'k-anonymity'
+        df = df.merge(grouped, on=quasi_identifiers, how='left')
+
+    return df.sort_values(by='k-anonymity')
+
 
 def remove_worst_k_anonymity_rows(df, max_percent=0.05):
     """
@@ -284,7 +320,7 @@ def remove_worst_k_anonymity_rows(df, max_percent=0.05):
     
     # Сортируем DataFrame по столбцу 'k-anonymity' в порядке возрастания
     df_sorted = df.sort_values(by='k-anonymity')
-    
+
     # Удаляем первые n строк с самым низким k-anonymity
     df_trimmed = df_sorted.iloc[n_rows_to_remove:]
     
@@ -338,14 +374,10 @@ def k_anonymity_statistics(df, k_threshold=7):
 
     return stats
 
+def anonimize(df):
 
-    
-if __name__ == '__main__':
-    # TODO : shop_name, item_name, brand_name, amount, price
-    df = read_csv(file_name='input_data/all_types_10k.csv',delimiter=';')
-    print(df.head())
     location_stores = get_store_coordinates('input_data/shop_locations.csv')
-    coordinates_mask_alternative(df,'Координаты')
+    coordinates_mask_alternative(df,'Координаты',location_stores=location_stores)
     date_mask(df,'Дата и время')
     shop_mask(df,'Магазин')
     card_mask(df,'Номер карты')
@@ -358,49 +390,107 @@ if __name__ == '__main__':
 
     quasi_identifiers = ['Магазин','Координаты','Номер карты','Количество', 'Цена','Товар','Производитель'] # 
     
-    df = add_k_anonymity_column(df,quasi_identifiers)
-    df = remove_worst_k_anonymity_rows(df, max_percent=0.05)
-    stats2 = k_anonymity_statistics(df, k_threshold=7)
+    df = add_or_update_k_anonymity_column(df,quasi_identifiers)
+    
+    stats = k_anonymity_statistics(df, k_threshold=7)
     print(df.head(),'\n\n')
 
-    for k in stats2.keys():
-        print(k,stats2[k])
+    for k in stats.keys():
+        print(k,stats[k])
     
-    # worst_k, best_k = calculate_k_anonymity(df, quasi_identifiers,all='no')
-    
-    
-    
-    # print("Топ-3 худших строк по k-анонимности:")
-    # print(worst_k)
+    print('\n-----\n')
+    df = even_stronger_anonymization(df)
+    df = remove_worst_k_anonymity_rows(df, max_percent=0.05)
+    df = add_or_update_k_anonymity_column(df,quasi_identifiers)
+    stats = k_anonymity_statistics(df, k_threshold=7)
+    print(df.head(20),'\n\n')
 
-    # print("\n Топ-3 лучших строк по k-анонимности:")
-    # print(best_k,'\n\n')
-    # print(df.head(n=1000))
+    for k in stats.keys():
+        print(k,stats[k])
+    
 
-    """
+
+# Создаем глобальную переменную для хранения DataFrame
+
+
+def load_file(file_label, attribute_vars):
+    global df_global  # Используем глобальную переменную
+    # Открытие диалогового окна для выбора файла
+    file_path = filedialog.askopenfilename(
+        filetypes=[("CSV файлы", "*.csv")], title="Выберите CSV файл"
+    )
+    
+    if not file_path:
+        return  # Если файл не выбран, возвращаемся
+
+    try:
+        # Попытка загрузить CSV файл
+        df_global = pd.read_csv(file_path, sep=';')
+
+        # Проверка количества колонок и наличия заголовков
+        required_columns = ["Магазин", "Координаты", "Дата и время", "Товар", "Производитель", "Номер карты", "Количество", "Цена"]
+
+        if list(df_global.columns) != required_columns:
+            messagebox.showerror("Ошибка", "Файл должен содержать следующие колонки: " + ', '.join(required_columns))
+            df_global = None  # Обнуляем глобальный DataFrame в случае ошибки
+            return
+
+        # Обновление метки с информацией о выбранном файле
+        file_label.config(text=f"Выбран файл: {file_path}")
+
+        # Устанавливаем квази-идентификаторы
+        for attribute in df_global.columns:
+            if attribute in attribute_vars:
+                attribute_vars[attribute].set(1)
+
+    except Exception as e:
+        messagebox.showerror("Ошибка", f"Ошибка при загрузке файла: {str(e)}")
+        df_global = None
+
+def process_file():
+    global df_global
+    if df_global is not None:
+        # Пример обработки данных
+        anonimize(df_global)
+    else:
+        print("Файл не был загружен.")
+
+def interface():
     root = tk.Tk()
     root.title("Обезличиватель датасета")
     root.geometry("500x600")
 
     greeting_label = tk.Label(root, text="Добро пожаловать! Выберите квази-идентификаторы:", font=("Arial", 14))
     greeting_label.pack(pady=20)
-    #load_button = tk.Button(root, text="Загрузить файл", command=load_file, font=("Arial", 12), bg="lightblue")
-    #load_button.pack(pady=10)
+
     file_label = tk.Label(root, text="", font=("Arial", 12))
     file_label.pack(pady=10)
 
+    # Добавляем кнопку для загрузки файла
+    load_button = tk.Button(root, text="Загрузить CSV файл", command=lambda: load_file(file_label, attribute_vars), font=("Arial", 12))
+    load_button.pack(pady=10)
+
+    # Кнопка для обработки файла
+    process_button = tk.Button(root, text="Обработать файл", command=process_file, font=("Arial", 12))
+    process_button.pack(pady=10)
+
+    # Переменные для чекбоксов
     attribute_vars = {}
 
+    columns = ["Магазин", "Координаты", "Дата и время", "Товар", "Производитель", "Номер карты", "Количество", "Цена"]
+    
     for attribute in columns:
         var = tk.IntVar(value=0)
         attribute_vars[attribute] = var
         checkbox = tk.Checkbutton(root, text=attribute, variable=var, font=("Arial", 12))
         checkbox.pack(anchor=tk.W)
 
-    #process_button = tk.Button(root, text="Обезличить и вычислить", command=handle_attributes, font=("Arial", 12), bg="green", fg="white")
-    #process_button.pack(pady=20)
-    #load_button2 = tk.Button(root, text="Вычислить k-anonymity", command=k_anon, font=("Arial", 12), bg="green", fg="white")
-    #load_button2.pack(pady=25)
-
     root.mainloop()
-    """
+
+
+
+if __name__ == '__main__':
+    # TODO : shop_name, item_name, brand_name, amount, price
+    
+    df = read_csv(file_name='input_data/all_types_1k.csv',delimiter=';')
+    interface()
