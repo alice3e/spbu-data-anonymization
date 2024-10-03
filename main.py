@@ -2,10 +2,12 @@ import pandas as pd
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog
-from tkinter import messagebox
+from tkinter import messagebox,scrolledtext
 import time
 
 df_global = None
+df_original = None  # Для хранения оригинального DataFrame
+stats = None
 columns = ['Магазин', 'Координаты', 'Дата и время', 'Товар', 'Производитель', 
            'Номер карты', 'Количество', 'Цена', 
             ]
@@ -374,39 +376,51 @@ def k_anonymity_statistics(df, k_threshold=7):
 
     return stats
 
-def anonimize(df):
-
-    location_stores = get_store_coordinates('input_data/shop_locations.csv')
-    coordinates_mask_alternative(df,'Координаты',location_stores=location_stores)
-    date_mask(df,'Дата и время')
-    shop_mask(df,'Магазин')
-    card_mask(df,'Номер карты')
-    price_mask(df,'Цена')
-    amount_mask(df,'Количество') # always after price_mask
-    item_mask(df,'Товар')
-    brand_mask(df,'Производитель')
+def anonimize(df, selected_attributes):
+    global stats
+    """
+    Анонимизация на основе выбранных квази-идентификаторов.
     
+    :param df: DataFrame
+    :param selected_attributes: Список выбранных атрибутов (квазиидентификаторов)
+    :return: Анонимизированный DataFrame
+    """
 
+    # Загрузка данных для анонимизации координат магазинов
+    location_stores = get_store_coordinates('input_data/shop_locations.csv')
+
+    # Проверяем каждый атрибут и запускаем соответствующую функцию анонимизации
+    if 'Координаты' in selected_attributes:
+        coordinates_mask_alternative(df, 'Координаты', location_stores=location_stores)
+    
+    if 'Дата и время' in selected_attributes:
+        date_mask(df, 'Дата и время')
+    
+    if 'Магазин' in selected_attributes:
+        shop_mask(df, 'Магазин')
+    
+    if 'Номер карты' in selected_attributes:
+        card_mask(df, 'Номер карты')
+    
+    if 'Цена' in selected_attributes:
+        price_mask(df, 'Цена')
+    
+    if 'Количество' in selected_attributes:
+        amount_mask(df, 'Количество')  # Всегда после price_mask
+    
+    if 'Товар' in selected_attributes:
+        item_mask(df, 'Товар')
+    
+    if 'Производитель' in selected_attributes:
+        brand_mask(df, 'Производитель')
 
     quasi_identifiers = ['Магазин','Координаты','Номер карты','Количество', 'Цена','Товар','Производитель'] # 
     
-    df = add_or_update_k_anonymity_column(df,quasi_identifiers)
-    
-    stats = k_anonymity_statistics(df, k_threshold=7)
-    print(df.head(),'\n\n')
-
-    for k in stats.keys():
-        print(k,stats[k])
-    
-    print('\n-----\n')
     df = even_stronger_anonymization(df)
-    df = remove_worst_k_anonymity_rows(df, max_percent=0.05)
     df = add_or_update_k_anonymity_column(df,quasi_identifiers)
+    df = remove_worst_k_anonymity_rows(df, max_percent=0.05)
     stats = k_anonymity_statistics(df, k_threshold=7)
-    print(df.head(20),'\n\n')
 
-    for k in stats.keys():
-        print(k,stats[k])
     
 
 
@@ -415,6 +429,7 @@ def anonimize(df):
 
 def load_file(file_label, attribute_vars):
     global df_global  # Используем глобальную переменную
+    global df_original
     # Открытие диалогового окна для выбора файла
     file_path = filedialog.askopenfilename(
         filetypes=[("CSV файлы", "*.csv")], title="Выберите CSV файл"
@@ -425,14 +440,15 @@ def load_file(file_label, attribute_vars):
 
     try:
         # Попытка загрузить CSV файл
-        df_global = pd.read_csv(file_path, sep=';')
-
+        df_original= pd.read_csv(file_path, sep=';')
+        df_global= pd.read_csv(file_path, sep=';')
         # Проверка количества колонок и наличия заголовков
         required_columns = ["Магазин", "Координаты", "Дата и время", "Товар", "Производитель", "Номер карты", "Количество", "Цена"]
 
         if list(df_global.columns) != required_columns:
             messagebox.showerror("Ошибка", "Файл должен содержать следующие колонки: " + ', '.join(required_columns))
             df_global = None  # Обнуляем глобальный DataFrame в случае ошибки
+            df_original = None
             return
 
         # Обновление метки с информацией о выбранном файле
@@ -446,15 +462,42 @@ def load_file(file_label, attribute_vars):
     except Exception as e:
         messagebox.showerror("Ошибка", f"Ошибка при загрузке файла: {str(e)}")
         df_global = None
+        df_original = None
+        
+def show_results(df):
+    head_df = df.head()
+    result_window = tk.Toplevel()  # Создаем новое окно
+    result_window.title("Результаты анонимизации")
+    result_window.geometry("600x400")
 
-def process_file():
-    global df_global
+    # Создаем текстовое поле с прокруткой
+    text_area = scrolledtext.ScrolledText(result_window, wrap=tk.WORD, font=("Arial", 12))
+    text_area.pack(expand=True, fill='both')
+
+    # Преобразуем DataFrame в строку и вставляем в текстовое поле
+    text_area.insert(tk.END, head_df.to_string(index=False))
+    text_area.configure(state='disabled')  # Делаем текстовое поле только для чтения
+
+
+def process_file(attribute_vars):
+    global df_global, df_original
     if df_global is not None:
-        # Пример обработки данных
-        anonimize(df_global)
-    else:
-        print("Файл не был загружен.")
+        # Проверяем, что df_original не None
+        if df_original is not None:
+            # Восстанавливаем DataFrame в исходное состояние
+            df_global = df_original.copy()
 
+            # Собираем выбранные атрибуты
+            selected_attributes = [attr for attr, var in attribute_vars.items() if var.get() == 1]
+            
+            # Передаем выбранные атрибуты в функцию анонимизации
+            anonimize(df_global, selected_attributes)
+            show_results(df=df_global)
+        else:
+            messagebox.showerror("Ошибка", "Оригинальные данные не загружены.")
+    else:
+        messagebox.showerror("Ошибка", "Файл не был загружен.")
+        
 def interface():
     root = tk.Tk()
     root.title("Обезличиватель датасета")
@@ -470,13 +513,9 @@ def interface():
     load_button = tk.Button(root, text="Загрузить CSV файл", command=lambda: load_file(file_label, attribute_vars), font=("Arial", 12))
     load_button.pack(pady=10)
 
-    # Кнопка для обработки файла
-    process_button = tk.Button(root, text="Обработать файл", command=process_file, font=("Arial", 12))
-    process_button.pack(pady=10)
-
-    # Переменные для чекбоксов
     attribute_vars = {}
-
+    
+    # Переменные для чекбоксов
     columns = ["Магазин", "Координаты", "Дата и время", "Товар", "Производитель", "Номер карты", "Количество", "Цена"]
     
     for attribute in columns:
@@ -485,7 +524,12 @@ def interface():
         checkbox = tk.Checkbutton(root, text=attribute, variable=var, font=("Arial", 12))
         checkbox.pack(anchor=tk.W)
 
+    # Кнопка для обработки файла
+    process_button = tk.Button(root, text="Обработать файл", command=lambda: process_file(attribute_vars), font=("Arial", 12))
+    process_button.pack(pady=10)
+
     root.mainloop()
+
 
 
 
