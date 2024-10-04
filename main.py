@@ -135,7 +135,6 @@ item_dict = { # 10 unique categories -> micro agreggation
     'штатив': 'фото/видео/аудио техника'
 }
 
-
 def read_csv(file_name, delimiter=';') -> pd.DataFrame: 
     df_csv = pd.read_csv(file_name, sep=delimiter)
     return df_csv
