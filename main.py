@@ -186,7 +186,6 @@ def card_mask(df, col):
     
     return df
 
-
 # если у сети магазинов с одним названием много точек по городу, то меняет их общие координаты на коордианыт одного магазина 
 def coordinates_mask_alternative(df, col,location_stores):
     output = []
@@ -255,31 +254,38 @@ def price_mask(df,col):
     df[col] = out
     return df
 
-def even_stronger_anonymization(df):
+def even_stronger_anonymization(df,selected_attributes):
     # Проверяем количество строк
     if len(df) < 30000:
         # 1. Агрегация даты до квартала года
-        df['Дата и время'] = df['Дата и время'].apply(lambda dt: f"{dt[:4]}-Q{(int(dt[5:7])-1)//3+1}" if isinstance(dt, str) and len(dt) >= 7 else dt)
+        if 'Дата и время' in selected_attributes:
+            df['Дата и время'] = df['Дата и время'].apply(lambda dt: f"{dt[:4]}-Q{(int(dt[5:7])-1)//3+1}" if isinstance(dt, str) and len(dt) >= 7 else dt)
         
+        if 'Координаты' in selected_attributes:
         # 2. Округление координат до целого числа
-        df['Координаты'] = df['Координаты'].apply(lambda coord: ', '.join([f"{round(float(x))}" for x in coord.split(", ")]) if coord != "- , -" else "- , -")
+            df['Координаты'] = df['Координаты'].apply(lambda coord: ', '.join([f"{round(float(x))}" for x in coord.split(", ")]) if coord != "- , -" else "- , -")
         
+        if 'Товар' in selected_attributes:
         # 3. Упрощение категорий товаров
-        df['Товар'] = df['Товар'].apply(lambda item: 'продукты питания' if item in ['еда готовая', 'йогурт', 'ряженка', 'творог обезжиренный','мясные продукты'] 
+            df['Товар'] = df['Товар'].apply(lambda item: 'продукты питания' if item in ['еда готовая', 'йогурт', 'ряженка', 'творог обезжиренный','мясные продукты'] 
                                          else 'электроника' if item in ['фото/видео/аудио техника','бытовая техника', 'компьютерная техника'] 
                                          else 'прочее')
         
+        if 'Производитель' in selected_attributes:
         # 4. Упрощение производителей
-        df['Производитель'] = df['Производитель'].apply(lambda prod: 'прочее')
+            df['Производитель'] = df['Производитель'].apply(lambda prod: 'прочее')
         
+        if 'Номер карты' in selected_attributes:
         # 5. Еще более жесткая маскировка карт
-        df['Номер карты'] = df['Номер карты'].apply(lambda card: str(card)[:0] + "X" * 16)
+            df['Номер карты'] = df['Номер карты'].apply(lambda card: str(card)[:0] + "X" * 16)
         
+        if 'Цена' in selected_attributes:
         # 6. Сгруппировать цены и количество
-        df['Цена'] = df['Цена'].apply(lambda price: 
+            df['Цена'] = df['Цена'].apply(lambda price: 
                                       '<10000' if '<5000' in str(price) or '10000' in str(price)
                                       else '>= 10000')
-        df['Количество'] = df['Количество'].apply(lambda qty: '-') #if 'some' in str(qty) else 'много')
+        if 'Количество' in selected_attributes:
+            df['Количество'] = df['Количество'].apply(lambda qty: '-') #if 'some' in str(qty) else 'много')
     
     return df
 
@@ -391,40 +397,59 @@ def anonimize(df, selected_attributes):
 
     # Проверяем каждый атрибут и запускаем соответствующую функцию анонимизации
     if 'Координаты' in selected_attributes:
+        print('Начата работа над Коордианатами')
         coordinates_mask_alternative(df, 'Координаты', location_stores=location_stores)
     
     if 'Дата и время' in selected_attributes:
+        print('Начата работа над Датой и Временем')
         date_mask(df, 'Дата и время')
     
     if 'Магазин' in selected_attributes:
+        print('Начата работа над Магазинами')
         shop_mask(df, 'Магазин')
     
     if 'Номер карты' in selected_attributes:
+        print('Начата работа над Картами')
         card_mask(df, 'Номер карты')
     
     if 'Цена' in selected_attributes:
+        print('Начата работа над Ценой')
         price_mask(df, 'Цена')
     
     if 'Количество' in selected_attributes:
+        print('Начата работа над Количеством')
         amount_mask(df, 'Количество')  # Всегда после price_mask
     
     if 'Товар' in selected_attributes:
+        print('Начата работа над Товаром')
         item_mask(df, 'Товар')
     
     if 'Производитель' in selected_attributes:
+        print('Начата работа над Производителем')
         brand_mask(df, 'Производитель')
 
     quasi_identifiers = ['Магазин','Координаты','Номер карты','Количество', 'Цена','Товар','Производитель'] # 
     
-    df = even_stronger_anonymization(df)
+    df = even_stronger_anonymization(df,selected_attributes)
     df = add_or_update_k_anonymity_column(df,quasi_identifiers)
     df = remove_worst_k_anonymity_rows(df, max_percent=0.05)
-    stats = k_anonymity_statistics(df, k_threshold=7)
-
-    
+    return df
 
 
-# Создаем глобальную переменную для хранения DataFrame
+def savefile(dataframe):
+    # Открываем окно для выбора пути сохранения файла
+    file_path = filedialog.asksaveasfilename(defaultextension=".csv", 
+                                             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                                             title="Сохранить файл как")
+    if file_path:
+        try:
+            # Сохраняем DataFrame в выбранном месте
+            dataframe.to_csv(file_path, sep=';', index=False)
+            messagebox.showinfo("Успех", f"Файл успешно сохранен: {file_path}")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить файл: {e}")
+    else:
+        messagebox.showinfo("Отмена", "Сохранение файла отменено.")
 
 
 def load_file(file_label, attribute_vars):
@@ -465,18 +490,27 @@ def load_file(file_label, attribute_vars):
         df_original = None
         
 def show_results(df):
-    head_df = df.head()
+    head_df = df.head(7)
     result_window = tk.Toplevel()  # Создаем новое окно
     result_window.title("Результаты анонимизации")
-    result_window.geometry("600x400")
+    result_window.geometry("800x400")
 
     # Создаем текстовое поле с прокруткой
     text_area = scrolledtext.ScrolledText(result_window, wrap=tk.WORD, font=("Arial", 12))
     text_area.pack(expand=True, fill='both')
 
     # Преобразуем DataFrame в строку и вставляем в текстовое поле
+    text = '\n\n'
+    stats = k_anonymity_statistics(df)
+    
+    for i in stats.keys():
+        text += (i + ' : ' + str(stats[i]) + '\n')
     text_area.insert(tk.END, head_df.to_string(index=False))
+    text_area.insert(tk.END,text)
     text_area.configure(state='disabled')  # Делаем текстовое поле только для чтения
+    
+    load_button = tk.Button(result_window, text="Сохранить CSV файл", command=lambda: savefile(df), font=("Arial", 12))
+    load_button.pack(pady=10)
 
 
 def process_file(attribute_vars):
@@ -489,9 +523,10 @@ def process_file(attribute_vars):
 
             # Собираем выбранные атрибуты
             selected_attributes = [attr for attr, var in attribute_vars.items() if var.get() == 1]
-            
+            print(selected_attributes)
             # Передаем выбранные атрибуты в функцию анонимизации
-            anonimize(df_global, selected_attributes)
+            df_global = anonimize(df_global, selected_attributes)
+            print(df_global.head())
             show_results(df=df_global)
         else:
             messagebox.showerror("Ошибка", "Оригинальные данные не загружены.")
