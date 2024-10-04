@@ -43,7 +43,7 @@ python main.py
 ### How to Use the GUI
 
 1. **Load File**: Click the "Open File" button to load a CSV dataset.
-<img src="docs/image-1.png" alt="alt text" width="500" height="300">
+<img src="docs/image-1.png" alt="alt text" width="500" height="600">
 2. **Anonymize Data**: Click "Anonymize" to apply k-anonymity and masking techniques.
 3. **Save Anonymized Data**: Click "Save" to export the anonymized dataset.
 <img src="docs/image-2.png" alt="alt text" width="500" height="300">
