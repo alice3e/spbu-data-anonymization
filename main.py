@@ -172,10 +172,10 @@ def card_mask(df, col):
         # Определение платежной системы по первым цифрам
         if first_four[:2] in mastercard_prefixes:
             # Для MASTERCARD объединяем
-            return "MASTERCARD-" + "X" * 12
+            return first_four + "X" * 12
         elif first_four[:1] in visa_prefixes:
             # Для VISA объединяем
-            return "VISA-" + "X" * 12
+            return first_four + "X" * 12
         else:
             # Для других карт оставляем только первые 4 цифры
             return first_four + "X" * 12
@@ -190,11 +190,11 @@ def coordinates_mask_alternative(df, col,location_stores):
     output = []
     for coordinates,shop_name in df[[col,'Магазин']].values:
         if shop_name in bad_locations:
-            output.append('- , -')
+            output.append('59.742865, 30.472608')
         elif shop_name in location_stores:
             output.append(location_stores[shop_name])
         else:
-            output.append('0.00 , 0.00')
+            output.append('59.933146, 30.437312')
             
     df[col] = output
     return df
